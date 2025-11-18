@@ -1,0 +1,89 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Template for ritual reminders (e.g., "Weekly Review", "Daily Standup")
+model RitualReminderTemplate {
+  id                      String   @id @default(uuid())
+  key                     String   @unique // e.g., "weekly-review", "daily-standup"
+  name                    String   // Display name
+  descriptionMarkdown     String   @default("")
+
+  // JSON array of timing offsets, e.g., ["-24h", "-1h"] means 24 hours before and 1 hour before
+  defaultTimingJson       String   @default("[]")
+
+  // JSON object for channel preferences, e.g., {"email": true, "slack": true, "push": false}
+  channelPreferencesJson  String   @default("{}")
+
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@index([key])
+}
+
+// Member preferences for ritual reminders
+model MemberRitualPreference {
+  id                String   @id @default(uuid())
+  memberId          String   // External member ID
+
+  // JSON object for opt-in levels per ritual, e.g., {"weekly-review": "all", "daily-standup": "minimal"}
+  optInLevelsJson   String   @default("{}")
+
+  // JSON object for quiet hours, e.g., {"start": "22:00", "end": "08:00", "timezone": "America/New_York"}
+  quietHoursJson    String   @default("{}")
+
+  // Track when this member was last notified for any ritual
+  lastNotifiedAt    DateTime?
+
+  // Additional metadata, e.g., {"preferredLanguage": "en", "pausedUntil": "2024-01-01"}
+  metaJson          String   @default("{}")
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([memberId])
+  @@index([memberId])
+}
+
+// Scheduled reminders to be sent
+model ScheduledReminder {
+  id                    String   @id @default(uuid())
+  memberId              String   // External member ID
+
+  // JSON object referencing the ritual instance, e.g., {"ritualId": "123", "ritualDate": "2024-01-15", "ritualType": "weekly-review"}
+  ritualInstanceRefJson String
+
+  // When to send this reminder
+  sendAt                DateTime
+
+  // Channel to use (email, slack, push, etc.)
+  channel               String
+
+  // Reference to template key
+  templateKey           String
+
+  // Status: pending, sent, skipped, failed
+  status                String   @default("pending")
+
+  // Error message if status is failed
+  errorMessage          String?
+
+  // Notification hub response
+  notificationHubResponse String?
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  sentAt                DateTime?
+
+  @@index([status, sendAt])
+  @@index([memberId])
+  @@index([templateKey])
+}
