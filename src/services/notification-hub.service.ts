@@ -1,6 +1,8 @@
 import { env } from '../config/env';
 import { logger } from '../config/logger';
 import { NotificationChannel, RitualInstanceRef } from '../types';
+import { adapterRegistry } from '../lib/adapters/adapter-registry';
+import { notificationLogService } from './notification-log.service';
 
 export interface SendNotificationRequest {
   memberId: string;
@@ -32,13 +34,41 @@ export class NotificationHubService {
     try {
       logger.info({ request }, 'Sending notification to hub');
 
-      // In a real implementation, this would make an HTTP request
-      // For now, we'll simulate the call with a stub
-      const response = await this.stubNotificationHubCall(request);
+      // Use adapter registry to send notification
+      const result = await adapterRegistry.send({
+        memberId: request.memberId,
+        channel: request.channel,
+        templateKey: request.templateKey,
+        ritualInstanceRef: request.ritualInstanceRef,
+        body: this.buildNotificationBody(request),
+        metadata: request.metadata,
+      });
 
-      logger.info({ response }, 'Notification hub response');
+      // Log the notification
+      await notificationLogService.createLog({
+        memberId: request.memberId,
+        notificationType: 'reminder',
+        channel: request.channel,
+        templateKey: request.templateKey,
+        ritualInstanceId: request.metadata?.ritualInstanceId,
+        content: {
+          ritualInstanceRef: request.ritualInstanceRef,
+          metadata: request.metadata,
+        },
+        status: result.success ? 'sent' : 'failed',
+        externalId: result.notificationId,
+        errorMessage: result.error,
+        hubResponse: result.metadata,
+      });
 
-      return response;
+      logger.info({ response: result }, 'Notification sent via adapter');
+
+      return {
+        success: result.success,
+        notificationId: result.notificationId,
+        message: result.message,
+        error: result.error,
+      };
     } catch (error: any) {
       logger.error({ error, request }, 'Failed to send notification');
 
@@ -47,6 +77,17 @@ export class NotificationHubService {
         error: error.message || 'Unknown error',
       };
     }
+  }
+
+  private buildNotificationBody(request: SendNotificationRequest): string {
+    // Build notification body from request
+    const { ritualInstanceRef, templateKey } = request;
+
+    return `
+Reminder: ${ritualInstanceRef.title || templateKey}
+Scheduled: ${new Date(ritualInstanceRef.ritualDate).toLocaleString()}
+Type: ${ritualInstanceRef.ritualType}
+    `.trim();
   }
 
   private async stubNotificationHubCall(

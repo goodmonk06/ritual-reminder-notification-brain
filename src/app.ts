@@ -6,6 +6,8 @@ import { healthRoutes } from './routes/health.routes';
 import { templateRoutes } from './routes/templates.routes';
 import { memberPreferenceRoutes } from './routes/member-preferences.routes';
 import { schedulingRoutes } from './routes/scheduling.routes';
+import { ritualInstanceRoutes } from './routes/ritual-instances.routes';
+import { formatErrorResponse } from './lib/errors';
 
 export async function buildApp() {
   const fastify = Fastify({
@@ -22,15 +24,15 @@ export async function buildApp() {
   await fastify.register(templateRoutes, { prefix: '/api' });
   await fastify.register(memberPreferenceRoutes, { prefix: '/api' });
   await fastify.register(schedulingRoutes, { prefix: '/api' });
+  await fastify.register(ritualInstanceRoutes, { prefix: '/api' });
 
   // Error handler
   fastify.setErrorHandler((error, request, reply) => {
-    fastify.log.error(error);
+    fastify.log.error({ error, url: request.url, method: request.method }, 'Request error');
 
-    reply.status(error.statusCode || 500).send({
-      error: error.message || 'Internal Server Error',
-      statusCode: error.statusCode || 500,
-    });
+    const errorResponse = formatErrorResponse(error, request.url);
+
+    reply.status(errorResponse.error.statusCode).send(errorResponse);
   });
 
   // 404 handler

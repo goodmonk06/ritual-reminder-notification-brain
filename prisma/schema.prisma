@@ -23,10 +23,31 @@ model RitualReminderTemplate {
   // JSON object for channel preferences, e.g., {"email": true, "slack": true, "push": false}
   channelPreferencesJson  String   @default("{}")
 
+  // Category for grouping templates
+  category                String   @default("general")
+
+  // Tags for filtering and organizing
+  tags                    String[] @default([])
+
+  // Whether this template is active
+  isActive                Boolean  @default(true)
+
+  // Priority level (1-5, 5 being highest)
+  priority                Int      @default(3)
+
+  // Custom metadata
+  metadataJson            String   @default("{}")
+
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
+  // Relations
+  ritualInstances         RitualInstance[]
+  customRules             ReminderRule[]
+
   @@index([key])
+  @@index([category])
+  @@index([isActive])
 }
 
 // Member preferences for ritual reminders
@@ -46,11 +67,21 @@ model MemberRitualPreference {
   // Additional metadata, e.g., {"preferredLanguage": "en", "pausedUntil": "2024-01-01"}
   metaJson          String   @default("{}")
 
+  // Member's timezone
+  timezone          String   @default("UTC")
+
+  // Whether notifications are globally paused
+  isPaused          Boolean  @default(false)
+
+  // Member groups this preference belongs to
+  groupMemberships  MemberGroupMembership[]
+
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   @@unique([memberId])
   @@index([memberId])
+  @@index([isPaused])
 }
 
 // Scheduled reminders to be sent
@@ -79,6 +110,16 @@ model ScheduledReminder {
   // Notification hub response
   notificationHubResponse String?
 
+  // Number of retry attempts
+  retryCount            Int      @default(0)
+
+  // Priority (inherited from template or overridden)
+  priority              Int      @default(3)
+
+  // Optional ritual instance relation
+  ritualInstanceId      String?
+  ritualInstance        RitualInstance? @relation(fields: [ritualInstanceId], references: [id], onDelete: SetNull)
+
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
   sentAt                DateTime?
@@ -86,4 +127,183 @@ model ScheduledReminder {
   @@index([status, sendAt])
   @@index([memberId])
   @@index([templateKey])
+  @@index([ritualInstanceId])
+  @@index([priority, sendAt])
+}
+
+// Actual ritual instances that are scheduled
+model RitualInstance {
+  id                  String   @id @default(uuid())
+  templateKey         String
+
+  // Ritual start time
+  scheduledAt         DateTime
+
+  // Duration in minutes (optional)
+  durationMinutes     Int?
+
+  // Title (can override template name)
+  title               String
+
+  // Description (can override template description)
+  description         String?
+
+  // Status of the ritual instance
+  status              String   @default("scheduled") // scheduled, in_progress, completed, cancelled
+
+  // Who created this instance
+  createdBy           String?
+
+  // Metadata specific to this instance
+  metadataJson        String   @default("{}")
+
+  // Relations
+  template            RitualReminderTemplate @relation(fields: [templateKey], references: [key], onDelete: Cascade)
+  reminders           ScheduledReminder[]
+  participants        RitualParticipant[]
+  notificationLogs    NotificationLog[]
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  completedAt         DateTime?
+
+  @@index([templateKey])
+  @@index([scheduledAt])
+  @@index([status])
+}
+
+// Track participants for each ritual instance
+model RitualParticipant {
+  id                String   @id @default(uuid())
+  ritualInstanceId  String
+  memberId          String
+
+  // Participation status
+  status            String   @default("invited") // invited, confirmed, declined, attended
+
+  // Response metadata
+  responseJson      String   @default("{}")
+
+  ritualInstance    RitualInstance @relation(fields: [ritualInstanceId], references: [id], onDelete: Cascade)
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([ritualInstanceId, memberId])
+  @@index([memberId])
+  @@index([status])
+}
+
+// Custom reminder rules per member and template
+model ReminderRule {
+  id                  String   @id @default(uuid())
+  memberId            String
+
+  // Template this rule applies to
+  templateKey         String
+
+  // Custom timing offsets (overrides template defaults)
+  customTimingJson    String   @default("[]")
+
+  // Custom channel preferences
+  customChannelsJson  String   @default("{}")
+
+  // Rule priority (higher = more important)
+  priority            Int      @default(1)
+
+  // Whether this rule is active
+  isActive            Boolean  @default(true)
+
+  // Conditions for applying this rule (JSON)
+  conditionsJson      String   @default("{}")
+
+  template            RitualReminderTemplate @relation(fields: [templateKey], references: [key], onDelete: Cascade)
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([memberId, templateKey])
+  @@index([memberId])
+  @@index([templateKey])
+  @@index([isActive])
+}
+
+// Member groups for bulk operations
+model MemberGroup {
+  id                String   @id @default(uuid())
+  name              String
+  description       String?
+
+  // Group metadata
+  metadataJson      String   @default("{}")
+
+  // Relations
+  memberships       MemberGroupMembership[]
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([name])
+}
+
+// Junction table for member group memberships
+model MemberGroupMembership {
+  id                  String   @id @default(uuid())
+  groupId             String
+  memberId            String
+
+  // Role within the group (optional)
+  role                String?
+
+  group               MemberGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  memberPreference    MemberRitualPreference @relation(fields: [memberId], references: [memberId], onDelete: Cascade)
+
+  createdAt           DateTime @default(now())
+
+  @@unique([groupId, memberId])
+  @@index([groupId])
+  @@index([memberId])
+}
+
+// Log of all notifications sent
+model NotificationLog {
+  id                    String   @id @default(uuid())
+  memberId              String
+
+  // Type of notification
+  notificationType      String   // reminder, update, cancellation, etc.
+
+  // Channel used
+  channel               String
+
+  // Template that triggered this
+  templateKey           String?
+
+  // Ritual instance if applicable
+  ritualInstanceId      String?
+  ritualInstance        RitualInstance? @relation(fields: [ritualInstanceId], references: [id], onDelete: SetNull)
+
+  // Notification content snapshot
+  contentJson           String
+
+  // Delivery status
+  status                String   @default("sent") // sent, failed, bounced
+
+  // External notification ID from hub
+  externalId            String?
+
+  // Error details if failed
+  errorMessage          String?
+
+  // Response from notification hub
+  hubResponseJson       String?
+
+  createdAt             DateTime @default(now())
+  sentAt                DateTime?
+
+  @@index([memberId])
+  @@index([templateKey])
+  @@index([ritualInstanceId])
+  @@index([status])
+  @@index([createdAt])
 }
